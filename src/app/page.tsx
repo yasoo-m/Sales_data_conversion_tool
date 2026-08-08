@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { MallType, BrandType, UnifiedRow, ConversionWarning, ConversionError } from '@/lib/types';
+import { buildExcelFileName } from '@/lib/filename';
 
 const MALL_OPTIONS: { value: MallType; label: string; logo: string }[] = [
   { value: 'amazon', label: 'Amazon', logo: 'https://www.google.com/s2/favicons?domain=amazon.co.jp&sz=32' },
@@ -37,6 +38,8 @@ export default function Home() {
   const [brand, setBrand] = useState<BrandType | ''>('');
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<UnifiedRow[]>([]);
+  // 変換に使用したモール・ブランド（変換後にプルダウンを変更されてもファイル名がずれないよう保持する）
+  const [converted, setConverted] = useState<{ mall: MallType; brand: BrandType } | null>(null);
   const [warnings, setWarnings] = useState<ConversionWarning[]>([]);
   const [errors, setErrors] = useState<ConversionError[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,6 +65,7 @@ export default function Home() {
     setRows([]);
     setWarnings([]);
     setErrors([]);
+    setConverted(null);
 
     try {
       const formData = new FormData();
@@ -80,6 +84,7 @@ export default function Home() {
       setRows(data.rows || []);
       setWarnings(data.warnings || []);
       setErrors(data.errors || []);
+      setConverted({ mall, brand });
     } catch (err) {
       setErrorMessage(`エラー: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -88,13 +93,13 @@ export default function Home() {
   };
 
   const handleDownload = async () => {
-    if (rows.length === 0) return;
+    if (rows.length === 0 || !converted) return;
 
     try {
       const res = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows }),
+        body: JSON.stringify({ rows, mall: converted.mall, brand: converted.brand }),
       });
 
       if (!res.ok) throw new Error('ダウンロードに失敗しました');
@@ -103,7 +108,7 @@ export default function Home() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sales_data_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.download = buildExcelFileName({ rows, mall: converted.mall, brand: converted.brand });
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {

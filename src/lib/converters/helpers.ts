@@ -146,6 +146,66 @@ export function resolvePostalCode(postalCode: string, rowIndex: number, warnings
   return { prefecture: '', city: '' };
 }
 
+/**
+ * 同一受注番号の行に配送料を均等割りする（変換後の共通処理）。
+ *
+ * 同一受注番号が複数行あり、かつ次のいずれかに合致する場合のみ再配分する:
+ *   1. 配送料が1行だけに入っていて、他は0（例: 1200, 0, 0）
+ *   2. 全行に同額の配送料が入っている（例: 1200, 1200, 1200）
+ * 行ごとに異なる金額が入っている場合、および全行0の場合は元の値のまま。
+ *
+ * 端数は先頭行に寄せるため、受注単位の配送料合計は元の金額と必ず一致する。
+ * 配送料の変更に伴い、P列(総売上)とQ列(粗利)も再計算する。
+ */
+export function distributeShippingFee(rows: UnifiedRow[]): UnifiedRow[] {
+  // 受注番号ごとに行インデックスをまとめる（出現順を維持）
+  const groups: number[][] = [];
+  const groupOf = new Map<string, number>();
+  rows.forEach((row, index) => {
+    if (!row.orderNumber) return;
+    const groupIndex = groupOf.get(row.orderNumber);
+    if (groupIndex === undefined) {
+      groupOf.set(row.orderNumber, groups.length);
+      groups.push([index]);
+    } else {
+      groups[groupIndex].push(index);
+    }
+  });
+
+  const result = rows.map(row => ({ ...row }));
+
+  for (const indexes of groups) {
+    if (indexes.length < 2) continue;
+
+    const fees = indexes.map((i: number) => result[i].shippingFee);
+    const nonZero = fees.filter((fee: number) => fee !== 0);
+
+    let orderShippingFee: number;
+    if (nonZero.length === 1) {
+      // ケース1: 1行だけに配送料が入っている
+      orderShippingFee = nonZero[0];
+    } else if (nonZero.length === fees.length && fees.every(fee => fee === fees[0])) {
+      // ケース2: 全行に同額が入っている（受注単位の送料が各行に重複）
+      orderShippingFee = fees[0];
+    } else {
+      // 上記以外（行ごとに異なる金額 / 全行0）は現状維持
+      continue;
+    }
+
+    const base = Math.floor(orderShippingFee / indexes.length);
+    const remainder = orderShippingFee - base * indexes.length;
+
+    indexes.forEach((rowIndex, j) => {
+      const row = result[rowIndex];
+      row.shippingFee = j === 0 ? base + remainder : base;
+      row.totalSales = row.total + row.shippingFee;
+      row.grossProfit = row.costTotal !== null ? row.totalSales - row.costTotal : null;
+    });
+  }
+
+  return result;
+}
+
 export function buildRow(params: {
   date: Date | null;
   postalCode: string;

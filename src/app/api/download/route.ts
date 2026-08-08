@@ -1,21 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateExcel } from '@/lib/excel-export';
-import type { UnifiedRow } from '@/lib/types';
+import { buildExcelFileName } from '@/lib/filename';
+import type { BrandType, MallType, UnifiedRow } from '@/lib/types';
 
 export async function POST(request: NextRequest) {
   try {
-    const { rows } = await request.json() as { rows: UnifiedRow[] };
+    const { rows, brand, mall } = await request.json() as {
+      rows: UnifiedRow[];
+      brand: BrandType;
+      mall: MallType;
+    };
 
     if (!rows || rows.length === 0) {
       return NextResponse.json({ error: 'データがありません' }, { status: 400 });
     }
 
     const buffer = await generateExcel(rows);
+    const fileName = buildExcelFileName({ rows, brand, mall });
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="sales_data_${new Date().toISOString().slice(0, 10)}.xlsx"`,
+        // 日本語ファイル名は filename= に直接書けないため RFC 5987 形式を併記する
+        'Content-Disposition': `attachment; filename="sales_data.xlsx"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       },
     });
   } catch (error) {
