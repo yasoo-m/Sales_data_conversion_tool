@@ -146,6 +146,65 @@ export function resolvePostalCode(postalCode: string, rowIndex: number, warnings
   return { prefecture: '', city: '' };
 }
 
+/** キャンセルデータとの照合キー: 受注番号・商品コード・小計(単価)・受注数 */
+function cancelKey(row: UnifiedRow): string {
+  return `${row.orderNumber}|${row.productCode}|${row.subtotal}|${row.quantity}`;
+}
+
+/**
+ * 売上データのうち、キャンセルデータに合致する行を特定する。
+ *
+ * 照合キーは受注番号・商品コード・小計・受注数の4項目。売上データには同一キーの行が
+ * 複数存在しうる（同じ商品が1受注内で複数明細に分かれるケース）ため、キャンセル行1件につき
+ * 売上行1件だけを消費する。キャンセル行に対応する売上行が無い場合は何もしない
+ * （モール側の売上CSVがキャンセル注文を最初から含まないケースがあるため）。
+ */
+export function matchCancelledRows(
+  rows: UnifiedRow[],
+  cancelRows: UnifiedRow[],
+): { cancelled: boolean[]; appliedRows: number } {
+  const remaining = new Map<string, number>();
+  for (const cancelRow of cancelRows) {
+    const key = cancelKey(cancelRow);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+
+  const cancelled = rows.map(() => false);
+  let appliedRows = 0;
+  rows.forEach((row, index) => {
+    const key = cancelKey(row);
+    const count = remaining.get(key) ?? 0;
+    if (count === 0) return;
+    remaining.set(key, count - 1);
+    cancelled[index] = true;
+    appliedRows++;
+  });
+
+  return { cancelled, appliedRows };
+}
+
+/**
+ * キャンセル該当行の金額をすべて0にする。
+ *
+ * M列(受注数)とO列(配送料)を0にし、それに伴うK列(原価計)・N列(合計)・P列(総売上)・
+ * Q列(粗利)も0にする。J列(原価)とL列(小計)は元の値を残し、行自体も削除しない。
+ * 原価が未取得の行(J列が空)は、原価計・粗利も空のまま維持する。
+ */
+export function zeroCancelledRows(rows: UnifiedRow[], cancelled: boolean[]): UnifiedRow[] {
+  return rows.map((row, index) => {
+    if (!cancelled[index]) return row;
+    return {
+      ...row,
+      costTotal: row.costPrice !== null ? 0 : null,
+      quantity: 0,
+      total: 0,
+      shippingFee: 0,
+      totalSales: 0,
+      grossProfit: row.costPrice !== null ? 0 : null,
+    };
+  });
+}
+
 /**
  * 同一受注番号の行に配送料を均等割りする（変換後の共通処理）。
  *
@@ -156,8 +215,12 @@ export function resolvePostalCode(postalCode: string, rowIndex: number, warnings
  *
  * 端数は先頭行に寄せるため、受注単位の配送料合計は元の金額と必ず一致する。
  * 配送料の変更に伴い、P列(総売上)とQ列(粗利)も再計算する。
+ *
+ * cancelled を渡した場合、受注単位の配送料はキャンセルされていない行にのみ配分する
+ * （一部キャンセルでも受注単位の送料は変わらないため）。全行キャンセルの受注は
+ * 配分先が無いため、そのまま zeroCancelledRows で0になる。
  */
-export function distributeShippingFee(rows: UnifiedRow[]): UnifiedRow[] {
+export function distributeShippingFee(rows: UnifiedRow[], cancelled?: boolean[]): UnifiedRow[] {
   // 受注番号ごとに行インデックスをまとめる（出現順を維持）
   const groups: number[][] = [];
   const groupOf = new Map<string, number>();
@@ -175,7 +238,8 @@ export function distributeShippingFee(rows: UnifiedRow[]): UnifiedRow[] {
   const result = rows.map(row => ({ ...row }));
 
   for (const indexes of groups) {
-    if (indexes.length < 2) continue;
+    const hasCancelled = indexes.some((i: number) => cancelled?.[i]);
+    if (indexes.length < 2 && !hasCancelled) continue;
 
     const fees = indexes.map((i: number) => result[i].shippingFee);
     const nonZero = fees.filter((fee: number) => fee !== 0);
@@ -192,10 +256,14 @@ export function distributeShippingFee(rows: UnifiedRow[]): UnifiedRow[] {
       continue;
     }
 
-    const base = Math.floor(orderShippingFee / indexes.length);
-    const remainder = orderShippingFee - base * indexes.length;
+    // 配分先はキャンセルされていない行のみ（全行キャンセルの場合は配分しない）
+    const targets = indexes.filter((i: number) => !cancelled?.[i]);
+    if (targets.length === 0) continue;
 
-    indexes.forEach((rowIndex, j) => {
+    const base = Math.floor(orderShippingFee / targets.length);
+    const remainder = orderShippingFee - base * targets.length;
+
+    targets.forEach((rowIndex, j) => {
       const row = result[rowIndex];
       row.shippingFee = j === 0 ? base + remainder : base;
       row.totalSales = row.total + row.shippingFee;

@@ -1,4 +1,4 @@
-export type MallType = 'amazon' | 'rakuten' | 'yahoo' | 'makeshop' | 'mercari' | 'aupay';
+export type MallType = 'amazon' | 'rakuten' | 'yahoo' | 'makeshop' | 'mercari';
 
 export type BrandType = 'cllink' | 'maqs';
 
@@ -8,8 +8,13 @@ export const MALL_LABELS: Record<MallType, string> = {
   yahoo: 'ヤフーショッピング',
   makeshop: 'メイクショップ',
   mercari: 'メルカリショップス',
-  aupay: 'au PAYマーケット',
 };
+
+/**
+ * 注文キャンセルデータの取り込みに対応するモール。
+ * キャンセルCSVが売上CSVと同一フォーマットで出力されるモールのみ対応する。
+ */
+export const CANCEL_SUPPORTED_MALLS: readonly MallType[] = ['rakuten', 'makeshop'];
 
 export const BRAND_LABELS: Record<BrandType, string> = {
   cllink: 'シーエルリンク (C.L.LINK)',
@@ -22,13 +27,11 @@ export const STORE_NAMES: Record<`${BrandType}_${MallType}`, string> = {
   cllink_yahoo: 'C.L.LINK ショッピング',
   cllink_makeshop: 'C.L.LINK MakeShop',
   cllink_mercari: 'C.L.LINK メルカリショップス',
-  cllink_aupay: 'C.L.LINK aupayマーケット',
   maqs_amazon: 'MAQs Amazon',
   maqs_rakuten: 'MAQs 楽天',
   maqs_yahoo: 'MAQs ショッピング',
   maqs_makeshop: 'MAQs MakeShop',
   maqs_mercari: 'MAQs メルカリショップス',
-  maqs_aupay: 'MAQs aupayマーケット',
 };
 
 export interface UnifiedRow {
@@ -56,6 +59,13 @@ export interface ConversionResult {
   rows: UnifiedRow[];
   warnings: ConversionWarning[];
   errors: ConversionError[];
+  cancelSummary?: CancelSummary;
+}
+
+/** 注文キャンセルデータの適用結果 */
+export interface CancelSummary {
+  cancelRows: number;   // キャンセルデータの明細行数
+  appliedRows: number;  // 受注数を0にした売上行数
 }
 
 export interface ConversionWarning {

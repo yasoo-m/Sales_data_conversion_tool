@@ -9,7 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { MallType, BrandType, UnifiedRow, ConversionWarning, ConversionError } from '@/lib/types';
+import type { MallType, BrandType, UnifiedRow, ConversionWarning, ConversionError, CancelSummary } from '@/lib/types';
+import { CANCEL_SUPPORTED_MALLS } from '@/lib/types';
 import { buildExcelFileName } from '@/lib/filename';
 
 const MALL_OPTIONS: { value: MallType; label: string; logo: string }[] = [
@@ -18,7 +19,6 @@ const MALL_OPTIONS: { value: MallType; label: string; logo: string }[] = [
   { value: 'yahoo', label: 'ヤフーショッピング', logo: 'https://www.google.com/s2/favicons?domain=shopping.yahoo.co.jp&sz=32' },
   { value: 'makeshop', label: 'メイクショップ', logo: 'https://www.google.com/s2/favicons?domain=makeshop.jp&sz=32' },
   { value: 'mercari', label: 'メルカリショップス', logo: 'https://www.google.com/s2/favicons?domain=mercari.com&sz=32' },
-  { value: 'aupay', label: 'au PAYマーケット', logo: 'https://www.google.com/s2/favicons?domain=wowma.jp&sz=32' },
 ];
 
 const BRAND_OPTIONS: { value: BrandType; label: string }[] = [
@@ -37,14 +37,25 @@ export default function Home() {
   const [mall, setMall] = useState<MallType | ''>('');
   const [brand, setBrand] = useState<BrandType | ''>('');
   const [file, setFile] = useState<File | null>(null);
+  const [cancelFile, setCancelFile] = useState<File | null>(null);
   const [rows, setRows] = useState<UnifiedRow[]>([]);
   // 変換に使用したモール・ブランド（変換後にプルダウンを変更されてもファイル名がずれないよう保持する）
   const [converted, setConverted] = useState<{ mall: MallType; brand: BrandType } | null>(null);
+  const [cancelSummary, setCancelSummary] = useState<CancelSummary | null>(null);
   const [warnings, setWarnings] = useState<ConversionWarning[]>([]);
   const [errors, setErrors] = useState<ConversionError[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isCancelDragOver, setIsCancelDragOver] = useState(false);
+
+  // キャンセルデータに対応するモールか（モールを切り替えたら選択済みファイルは破棄する）
+  const cancelSupported = !!mall && CANCEL_SUPPORTED_MALLS.includes(mall);
+
+  const handleMallChange = useCallback((value: string) => {
+    setMall(value as MallType);
+    if (!CANCEL_SUPPORTED_MALLS.includes(value as MallType)) setCancelFile(null);
+  }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -58,11 +69,24 @@ export default function Home() {
     if (selected) setFile(selected);
   }, []);
 
+  const handleCancelDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsCancelDragOver(false);
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile) setCancelFile(droppedFile);
+  }, []);
+
+  const handleCancelFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0];
+    if (selected) setCancelFile(selected);
+  }, []);
+
   const handleConvert = async () => {
     if (!mall || !brand || !file) return;
     setLoading(true);
     setErrorMessage('');
     setRows([]);
+    setCancelSummary(null);
     setWarnings([]);
     setErrors([]);
     setConverted(null);
@@ -72,6 +96,7 @@ export default function Home() {
       formData.append('file', file);
       formData.append('mall', mall);
       formData.append('brand', brand);
+      if (cancelSupported && cancelFile) formData.append('cancelFile', cancelFile);
 
       const res = await fetch('/api/convert', { method: 'POST', body: formData });
       const data = await res.json();
@@ -82,6 +107,7 @@ export default function Home() {
       }
 
       setRows(data.rows || []);
+      setCancelSummary(data.cancelSummary || null);
       setWarnings(data.warnings || []);
       setErrors(data.errors || []);
       setConverted({ mall, brand });
@@ -177,7 +203,7 @@ export default function Home() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-gray-700">モール選択</Label>
-                <Select value={mall} onValueChange={(v) => setMall(v as MallType)}>
+                <Select value={mall} onValueChange={handleMallChange}>
                   <SelectTrigger className="h-11"><SelectValue placeholder="モールを選択してください" /></SelectTrigger>
                   <SelectContent>
                     {MALL_OPTIONS.map(o => (
@@ -244,6 +270,59 @@ export default function Home() {
               </div>
             </div>
 
+            {/* 注文キャンセルデータ（楽天・メイクショップのみ・任意） */}
+            {cancelSupported && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-semibold text-gray-700">注文キャンセルデータ</Label>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">任意</Badge>
+                </div>
+                <div
+                  className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all duration-200 ${
+                    isCancelDragOver
+                      ? 'border-orange-400 bg-orange-50 scale-[1.01]'
+                      : cancelFile
+                      ? 'border-orange-300 bg-orange-50/50'
+                      : 'border-gray-200 hover:border-orange-300 hover:bg-orange-50/30'
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); setIsCancelDragOver(true); }}
+                  onDragLeave={() => setIsCancelDragOver(false)}
+                  onDrop={handleCancelDrop}
+                  onClick={() => document.getElementById('cancel-file-input')?.click()}
+                >
+                  <input
+                    id="cancel-file-input"
+                    type="file"
+                    accept=".csv,.xlsx,.xls,.tsv"
+                    className="hidden"
+                    onChange={handleCancelFileChange}
+                  />
+                  {cancelFile ? (
+                    <div className="flex items-center justify-center gap-3">
+                      <div className="w-9 h-9 bg-orange-100 rounded-lg flex items-center justify-center">🚫</div>
+                      <div className="text-left">
+                        <p className="font-semibold text-gray-900 text-sm">{cancelFile.name}</p>
+                        <p className="text-xs text-gray-500">{(cancelFile.size / 1024).toFixed(1)} KB - クリックで変更</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs text-gray-500 hover:text-red-600"
+                        onClick={(e) => { e.stopPropagation(); setCancelFile(null); }}
+                      >
+                        解除
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <p className="text-sm text-gray-600 font-medium">🚫 キャンセルデータをドラッグ&ドロップ</p>
+                      <p className="text-xs text-gray-400">該当する行の受注数・配送料を0にします（未指定ならそのまま変換）</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-3 pt-2">
               <Button
                 onClick={handleConvert}
@@ -271,6 +350,20 @@ export default function Home() {
         {errorMessage && (
           <Alert variant="destructive" className="border-red-200 bg-red-50">
             <AlertDescription className="font-medium">{errorMessage}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* キャンセルデータの適用結果 */}
+        {cancelSummary && (
+          <Alert className="border-orange-200 bg-orange-50">
+            <AlertDescription className="font-medium text-orange-900">
+              🚫 注文キャンセルデータ {cancelSummary.cancelRows}行のうち {cancelSummary.appliedRows}行が売上データに合致し、受注数・配送料を0にしました。
+              {cancelSummary.cancelRows > cancelSummary.appliedRows && (
+                <span className="block mt-1 text-xs font-normal text-orange-800">
+                  残り{cancelSummary.cancelRows - cancelSummary.appliedRows}行は売上データに該当行がないため、何も変更していません。
+                </span>
+              )}
+            </AlertDescription>
           </Alert>
         )}
 
