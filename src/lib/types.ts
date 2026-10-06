@@ -16,6 +16,27 @@ export const MALL_LABELS: Record<MallType, string> = {
  */
 export const CANCEL_SUPPORTED_MALLS: readonly MallType[] = ['rakuten', 'makeshop'];
 
+/**
+ * 注文キャンセルの対象外とする会員ID（G列）。
+ *
+ * ここに該当する会員IDの売上行は、キャンセルデータに合致しても受注数を0にしない。
+ * 業販・社内用など、モール側でキャンセル扱いになっても売上として計上する取引のため。
+ * 会員IDを持たないモール（楽天市場など）はG列が空のため、この除外は適用されない。
+ */
+export const CANCEL_EXCLUDED_MEMBER_IDS: readonly string[] = [
+  '260831000002',
+  '260313000006',
+  '260313000005',
+  '260313000004',
+  '260204000002',
+  '240809000003',
+  '240523000003',
+  '240115000004',
+  '231210000002',
+  '211124000005',
+  '211103000006',
+];
+
 export const BRAND_LABELS: Record<BrandType, string> = {
   cllink: 'シーエルリンク (C.L.LINK)',
   maqs: 'MAQs',
@@ -64,8 +85,9 @@ export interface ConversionResult {
 
 /** 注文キャンセルデータの適用結果 */
 export interface CancelSummary {
-  cancelRows: number;   // キャンセルデータの明細行数
-  appliedRows: number;  // 受注数を0にした売上行数
+  cancelRows: number;    // キャンセルデータの明細行数
+  appliedRows: number;   // 受注数を0にした売上行数
+  excludedRows: number;  // 対象外の会員IDに該当し、適用を見送ったキャンセル明細行数
 }
 
 export interface ConversionWarning {

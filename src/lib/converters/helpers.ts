@@ -1,5 +1,5 @@
 import type { BrandType, ConversionWarning, UnifiedRow } from '../types';
-import { STORE_NAMES, type MallType } from '../types';
+import { CANCEL_EXCLUDED_MEMBER_IDS, STORE_NAMES, type MallType } from '../types';
 import { ensureInit } from '../db';
 
 // ---- Master data caches (loaded once before conversion) ----
@@ -151,6 +151,13 @@ function cancelKey(row: UnifiedRow): string {
   return `${row.orderNumber}|${row.productCode}|${row.subtotal}|${row.quantity}`;
 }
 
+/** 会員ID(G列)がキャンセルの対象外に指定されているか */
+function isCancelExcluded(row: UnifiedRow): boolean {
+  const memberNumber = row.memberNumber.trim();
+  if (!memberNumber) return false;
+  return CANCEL_EXCLUDED_MEMBER_IDS.includes(memberNumber);
+}
+
 /**
  * 売上データのうち、キャンセルデータに合致する行を特定する。
  *
@@ -158,13 +165,22 @@ function cancelKey(row: UnifiedRow): string {
  * 複数存在しうる（同じ商品が1受注内で複数明細に分かれるケース）ため、キャンセル行1件につき
  * 売上行1件だけを消費する。キャンセル行に対応する売上行が無い場合は何もしない
  * （モール側の売上CSVがキャンセル注文を最初から含まないケースがあるため）。
+ *
+ * CANCEL_EXCLUDED_MEMBER_IDS に該当する会員IDは対象外とし、キャンセルデータ側・売上データ側の
+ * 両方で除外する。これにより照合キーが偶然一致した場合でも、対象外の会員の売上行が
+ * 0になることはない。
  */
 export function matchCancelledRows(
   rows: UnifiedRow[],
   cancelRows: UnifiedRow[],
-): { cancelled: boolean[]; appliedRows: number } {
+): { cancelled: boolean[]; appliedRows: number; excludedRows: number } {
   const remaining = new Map<string, number>();
+  let excludedRows = 0;
   for (const cancelRow of cancelRows) {
+    if (isCancelExcluded(cancelRow)) {
+      excludedRows++;
+      continue;
+    }
     const key = cancelKey(cancelRow);
     remaining.set(key, (remaining.get(key) ?? 0) + 1);
   }
@@ -172,6 +188,7 @@ export function matchCancelledRows(
   const cancelled = rows.map(() => false);
   let appliedRows = 0;
   rows.forEach((row, index) => {
+    if (isCancelExcluded(row)) return;
     const key = cancelKey(row);
     const count = remaining.get(key) ?? 0;
     if (count === 0) return;
@@ -180,7 +197,7 @@ export function matchCancelledRows(
     appliedRows++;
   });
 
-  return { cancelled, appliedRows };
+  return { cancelled, appliedRows, excludedRows };
 }
 
 /**

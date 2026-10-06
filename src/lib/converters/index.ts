@@ -36,7 +36,7 @@ export function getConverter(mall: MallType): Converter | null {
 
     // キャンセルデータ側の警告・エラーは売上データの検証結果ではないため取り込まない
     const cancelResult = await converter(cancelRows, brand);
-    const { cancelled, appliedRows } = matchCancelledRows(result.rows, cancelResult.rows);
+    const { cancelled, appliedRows, excludedRows } = matchCancelledRows(result.rows, cancelResult.rows);
 
     // 配送料の均等割りを先に行い、そのうえでキャンセル該当行を0にする
     const distributed = distributeShippingFee(result.rows, cancelled);
@@ -44,7 +44,7 @@ export function getConverter(mall: MallType): Converter | null {
     return {
       ...result,
       rows: zeroCancelledRows(distributed, cancelled),
-      cancelSummary: { cancelRows: cancelResult.rows.length, appliedRows },
+      cancelSummary: { cancelRows: cancelResult.rows.length, appliedRows, excludedRows },
     };
   };
 }

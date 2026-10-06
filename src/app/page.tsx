@@ -358,9 +358,14 @@ export default function Home() {
           <Alert className="border-orange-200 bg-orange-50">
             <AlertDescription className="font-medium text-orange-900">
               🚫 注文キャンセルデータ {cancelSummary.cancelRows}行のうち {cancelSummary.appliedRows}行が売上データに合致し、受注数・配送料を0にしました。
-              {cancelSummary.cancelRows > cancelSummary.appliedRows && (
+              {cancelSummary.excludedRows > 0 && (
                 <span className="block mt-1 text-xs font-normal text-orange-800">
-                  残り{cancelSummary.cancelRows - cancelSummary.appliedRows}行は売上データに該当行がないため、何も変更していません。
+                  うち{cancelSummary.excludedRows}行は対象外に指定された会員IDのため、キャンセルを適用していません。
+                </span>
+              )}
+              {cancelSummary.cancelRows - cancelSummary.appliedRows - cancelSummary.excludedRows > 0 && (
+                <span className="block mt-1 text-xs font-normal text-orange-800">
+                  残り{cancelSummary.cancelRows - cancelSummary.appliedRows - cancelSummary.excludedRows}行は売上データに該当行がないため、何も変更していません。
                 </span>
               )}
             </AlertDescription>
